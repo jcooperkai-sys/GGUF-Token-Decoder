@@ -1,0 +1,25 @@
+[project]
+name = "gguf-token-decoder"
+version = "0.1.0"
+description = "Decode raw token IDs back to real text using a GGUF model's own embedded tokenizer vocabulary -- no ML framework required."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "GGUF Token Decoder contributors" }]
+keywords = ["gguf", "tokenizer", "llama.cpp", "ollama", "tokens", "interpretability"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.scripts]
+gguf-tokens = "gguf_tokens:_cli_entry"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["gguf_tokens"]
