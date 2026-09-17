@@ -22,7 +22,9 @@ ID (or dump the whole table) back to the real text it represents.
 
 (The `Ġ` you'll see on many tokens is a real, standard marker most GPT-2/BPE-style
 tokenizers use for "this token starts a new word" -- it isn't a bug or
-mangled text, it's how the vocabulary really stores that information.)
+mangled text, it's how the vocabulary really stores that information.
+Pass `--clean` to `decode` to reverse it back to a normal space, the way
+`decode_text_clean()` does below.)
 
 ## Install
 
@@ -40,8 +42,12 @@ python3 gguf_tokens.py --help
 # Decode specific token IDs
 python3 gguf_tokens.py ./your-model.gguf decode 25125 51902 100
 
-# Reconstruct real text from a sequence of IDs
+# Reconstruct real text from a sequence of IDs (raw tokenizer pieces)
 python3 gguf_tokens.py ./your-model.gguf decode 51902 67403 --join
+
+# Same, but reversed back to normal human-readable text -- real spaces
+# and newlines instead of the tokenizer's own Ġ/Ċ/▁ markers
+python3 gguf_tokens.py ./your-model.gguf decode 51902 67403 --clean
 
 # Search the real vocabulary for every token containing a substring
 python3 gguf_tokens.py ./your-model.gguf find banana
@@ -69,7 +75,8 @@ from gguf_tokens import load_vocab
 vocab = load_vocab("your-model.gguf")
 print(len(vocab), "real tokens")
 print(vocab.decode_id(51902))          # 'Ġbanana'
-print(vocab.decode_text([51902, 67403]))  # 'Ġbananaġbananas' (real, concatenated pieces)
+print(vocab.decode_text([51902, 67403]))       # 'Ġbananaġbananas' (raw tokenizer pieces)
+print(vocab.decode_text_clean([51902, 67403])) # ' banana bananas' (real, readable text)
 for tid, tok in vocab.find("anana"):
     print(tid, tok)
 ```

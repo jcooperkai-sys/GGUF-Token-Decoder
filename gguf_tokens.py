@@ -36,6 +36,37 @@ _SCALAR_FORMATS = {
 }
 
 
+def _gpt2_byte_decoder() -> dict[str, int]:
+    """The real, standard GPT-2 byte-level BPE mapping (from OpenAI's own
+    reference implementation), inverted. A byte-level BPE tokenizer never
+    operates on raw bytes directly -- it first remaps every one of the 256
+    possible byte values to a printable unicode character (so whitespace,
+    control characters, etc. all become visible characters the BPE merge
+    algorithm can work with), including the real, correct ones you saw:
+    0x20 (space) -> 'Ġ', 0x0A (newline) -> 'Ċ'. This is that same mapping,
+    inverted, so a decoded token string can be turned back into the real
+    original bytes -- not a guess at "probably a space," the actual
+    reverse of the actual forward mapping every GPT-2-style tokenizer
+    (GPT-2, GPT-J, StarCoder, Qwen, DeepSeek, and others) really uses."""
+    bs = (
+        list(range(ord("!"), ord("~") + 1))
+        + list(range(ord("¡"), ord("¬") + 1))
+        + list(range(ord("®"), ord("ÿ") + 1))
+    )
+    cs = bs[:]
+    n = 0
+    for b in range(256):
+        if b not in bs:
+            bs.append(b)
+            cs.append(256 + n)
+            n += 1
+    byte_encoder = {b: chr(c) for b, c in zip(bs, cs)}
+    return {ch: b for b, ch in byte_encoder.items()}
+
+
+_GPT2_BYTE_DECODER = _gpt2_byte_decoder()
+
+
 class GGUFParseError(Exception):
     """The file isn't a real, well-formed GGUF file at the point this failed."""
 
@@ -77,6 +108,45 @@ class GGUFVocab:
         stored it rather than guessed at, so the output is the real,
         exact reconstruction, not a cleaned-up approximation."""
         return "".join(self.decode_ids(token_ids))
+
+    def decode_text_clean(self, token_ids: list[int]) -> str:
+        """The real, human-readable text -- not the raw tokenizer piece
+        markers. Two real tokenizer families need two different real
+        reversals, and this picks the right one from the file's own
+        tokenizer.ggml.model metadata rather than guessing:
+
+        - Byte-level BPE (GPT-2 and everything built the same way --
+          GPT-J, StarCoder, Qwen, DeepSeek, ...): every REAL (non-special)
+          token piece is a sequence of the real remapped-byte characters
+          (see _gpt2_byte_decoder). A real special/control token (e.g.
+          <think>, <｜User｜>) is never byte-remapped -- it's already
+          literal text -- so each piece is converted to real raw bytes
+          individually (falling back to a direct UTF-8 encode for a
+          special token), and only the FULL resulting byte sequence is
+          UTF-8-decoded, once, at the very end. Decoding piece-by-piece
+          instead would break on a real multi-byte character (e.g. an
+          emoji, or non-Latin text) that a real BPE tokenizer legitimately
+          split across two adjacent token pieces.
+        - SentencePiece (LLaMA, Mistral, Gemma, ...): a word boundary is a
+          real literal '▁' (U+2581) character, not a byte remapping --
+          this just turns each one into a real space.
+
+        Falls back to the raw decode_text if the file's tokenizer type
+        isn't one of these two (rather than silently mangling text from a
+        family this hasn't been taught the real reversal for)."""
+        model = (self.tokenizer_model or "").lower()
+        pieces = self.decode_ids(token_ids)
+        if model in ("gpt2", "gpt-2", "bpe"):
+            raw_bytes = bytearray()
+            for piece in pieces:
+                try:
+                    raw_bytes += bytes(_GPT2_BYTE_DECODER[ch] for ch in piece)
+                except KeyError:
+                    raw_bytes += piece.encode("utf-8")
+            return bytes(raw_bytes).decode("utf-8", errors="replace")
+        if model in ("llama", "sentencepiece", "spm"):
+            return "".join(pieces).replace("▁", " ")
+        return "".join(pieces)
 
     def find(self, substring: str, limit: int = 50) -> list[tuple[int, str]]:
         """Every real (id, token) pair whose token text actually contains
@@ -168,6 +238,7 @@ def _cli(argv: list[str]) -> int:
     p_decode = sub.add_parser("decode", help="Decode one or more real token IDs to their real text")
     p_decode.add_argument("ids", nargs="+", type=int, help="Real token IDs, e.g. 25125 881 204")
     p_decode.add_argument("--join", action="store_true", help="Concatenate the decoded pieces into one real string instead of listing each pair")
+    p_decode.add_argument("--clean", action="store_true", help="Reverse the tokenizer's real byte/space markers (Ġ/Ċ/▁) back to normal readable text. Implies --join.")
 
     p_find = sub.add_parser("find", help="Search the real vocab for every token containing a substring")
     p_find.add_argument("substring")
@@ -188,6 +259,9 @@ def _cli(argv: list[str]) -> int:
 
     if args.command == "decode":
         try:
+            if args.clean:
+                print(vocab.decode_text_clean(args.ids))
+                return 0
             pieces = vocab.decode_ids(args.ids)
         except IndexError as err:
             print(f"error: {err}", file=sys.stderr)
